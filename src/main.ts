@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { serveStatic } from '@hono/deno'
 
 const app = new Hono();
 
@@ -24,5 +25,7 @@ async function routeEndpoints(app:Hono, dir: URL, base = '') {
 }
 
 await routeEndpoints(app, new URL("./endpoint/", import.meta.url))
+
+app.get('/static/*', serveStatic({ root: './'}))
 
 Deno.serve(app.fetch)
