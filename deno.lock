@@ -2,7 +2,9 @@
   "version": "5",
   "specifiers": {
     "npm:@hono/deno@^1.0.3": "1.0.3_hono@4.13.14",
-    "npm:hono@^4.13.14": "4.13.14"
+    "npm:hono@^4.13.14": "4.13.14",
+    "npm:postgres@*": "3.4.9",
+    "npm:postgres@3": "3.4.9"
   },
   "npm": {
     "@hono/deno@1.0.3_hono@4.13.14": {
@@ -13,12 +15,16 @@
     },
     "hono@4.13.14": {
       "integrity": "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ=="
+    },
+    "postgres@3.4.9": {
+      "integrity": "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="
     }
   },
   "workspace": {
     "dependencies": [
       "npm:@hono/deno@^1.0.3",
-      "npm:hono@^4.13.14"
+      "npm:hono@^4.13.14",
+      "npm:postgres@3"
     ]
   }
 }
