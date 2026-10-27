@@ -1,9 +1,10 @@
 {
   "imports": {
-    "hono": "npm:hono@^4"
+    "@hono/deno": "npm:@hono/deno@^1.0.3",
+    "hono": "npm:hono@^4.13.14"
   },
   "tasks": {
-    "dev": "deno run --watch src/main.ts --allow-read --allow-net",
+    "dev": "deno run --watch  --allow-read --allow-net src/main.ts",
     "start": "deno run src/main.ts",
     "check": "deno check src/main.ts",
     "fmt": "deno fmt",
