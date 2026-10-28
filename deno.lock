@@ -3,6 +3,8 @@
   "specifiers": {
     "npm:@hono/deno@^1.0.3": "1.0.3_hono@4.13.14",
     "npm:hono@^4.13.14": "4.13.14",
+    "npm:nodemailer@*": "10.2.1",
+    "npm:nodemailer@^10.2.1": "10.2.1",
     "npm:postgres@*": "3.4.9",
     "npm:postgres@3": "3.4.9"
   },
@@ -16,6 +18,9 @@
     "hono@4.13.14": {
       "integrity": "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ=="
     },
+    "nodemailer@10.2.1": {
+      "integrity": "sha512-ZrDNsPFoDMwefNs7sJwrYiEJ/CG4ClJWDZv05iNJsEBWa8GRDry1QJHTJxsuTAY9eDDKjX4k+q3SxslXJOao7w=="
+    },
     "postgres@3.4.9": {
       "integrity": "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="
     }
@@ -24,6 +29,7 @@
     "dependencies": [
       "npm:@hono/deno@^1.0.3",
       "npm:hono@^4.13.14",
+      "npm:nodemailer@^10.2.1",
       "npm:postgres@3"
     ]
   }
