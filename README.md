@@ -1,6 +1,6 @@
 # hyele
 
-The second version of the backend for Hymenia, written in Typescript and utilising Deno, Hono and Zed.
+The second version of the backend for Hymenia, written in Typescript and utilising Deno, Hono and Zod.
 
 ## Development
 
