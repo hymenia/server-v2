@@ -1,10 +1,11 @@
-
 import { Hono } from "hono";
+import { SERVER_DOMAIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 
 const app = new Hono();
 
 interface PublicUser {
+  public_id: string;
   username: string;
   created_at: string | Date;
 }
@@ -23,7 +24,7 @@ app.get("/:username", async (c) => {
 
   try {
     const rows = await sql<PublicUser[]>`
-      SELECT username, created_at
+      SELECT public_id, username, created_at
       FROM users
       WHERE username = ${username}
       LIMIT 1
@@ -37,7 +38,12 @@ app.get("/:username", async (c) => {
 
     c.header("Cache-Control", "public, max-age=60");
 
-    return c.json({ user });
+    return c.json({
+    user: {
+        ...user,
+        address: `${user.username}@${SERVER_DOMAIN}`,
+    },
+    });
   } catch (error) {
     console.error("User lookup failed:", error);
     return c.json(
