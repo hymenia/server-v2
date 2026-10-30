@@ -6,13 +6,12 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username VARCHAR(30) NOT NULL,
-    password_hash TEXT NOT NULL,
-    public_key TEXT NOT NULL
-        CHECK (public_key ~ '^[0-9a-f]{64}$'),
-    private_key TEXT NOT NULL
-        CHECK (private_key ~ '^[0-9a-f]{64}$'),
+    password_hash TEXT,
+    host TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    public_key TEXT NOT NULL,
+    private_key TEXT NOT NULL,
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique
