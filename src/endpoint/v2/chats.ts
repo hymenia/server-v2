@@ -2,30 +2,14 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
+import { getAuthUser } from "../../services/auth.ts";
 import { signMessage } from "../../services/fedi-crypto.ts";
 
 const app = new Hono();
 
-const COOKIE = "__Host-hymenia_session";
 const MAX_BODY_SIZE = 16 * 1024;
 
 type AccessMode = "inherited" | "restricted" | "public";
-
-interface PublicUser {
-    id: string;
-    username: string;
-    email: string;
-}
-
-interface ActorRow {
-    id: string;
-    actor_uri: string;
-}
-
-interface AuthUser {
-    user: PublicUser;
-    actor: ActorRow;
-}
 
 interface ChatRow {
     id: string;
@@ -86,56 +70,6 @@ function toChatDto(row: ChatRow) {
         createdAt: new Date(row.created_at).toISOString(),
         updatedAt: new Date(row.updated_at).toISOString(),
     };
-}
-
-function readToken(c: Context): string | null {
-    const cookie = c.req.header("Cookie") ?? "";
-    const prefix = COOKIE + "=";
-
-    const item = cookie
-        .split(";")
-        .map(v => v.trim())
-        .find(v => v.startsWith(prefix));
-
-    const token = item?.slice(prefix.length);
-    return token && /^[0-9a-f]{64}$/.test(token) ? token : null;
-}
-
-async function hash(value: string): Promise<string> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function getAuthUser(c: Context): Promise<AuthUser | null> {
-    const token = readToken(c);
-    if (!token) return null;
-
-    const tokenHash = await hash(token);
-
-    const users = await sql<PublicUser[]>`
-        select u.id, u.username, u.email
-        from public.sessions s
-        join public.users u on u.id = s.user_id
-        where s.token_hash = ${tokenHash}
-          and s.expires_at > now()
-        limit 1
-    `;
-
-    const user = users[0];
-    if (!user) return null;
-
-    const actors = await sql<ActorRow[]>`
-        select id, actor_uri
-        from "v2".actors
-        where local_user_id = ${user.id}
-          and is_active = true
-        limit 1
-    `;
-
-    const actor = actors[0];
-    if (!actor) return null;
-
-    return { user, actor };
 }
 
 function isValidUuid(value: string): boolean {
