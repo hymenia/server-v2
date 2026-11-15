@@ -644,4 +644,16 @@ CREATE TABLE IF NOT EXISTS "v2".channel_role_access (
 CREATE INDEX IF NOT EXISTS channel_role_access_role_idx
 ON "v2".channel_role_access (space_id, role_id);
 
+create table "v2".messages (
+    id uuid primary key,
+    channel_id uuid not null references "v2".channels(id) on delete cascade,
+    author_actor_id uuid not null references "v2".actors(id),
+    content text not null,
+    created_at timestamptz not null default now(),
+    edited_at timestamptz,
+    deleted_at timestamptz
+);
+
+create index on "v2".messages (channel_id, created_at desc, id desc);
+
 COMMIT;
