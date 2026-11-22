@@ -11,7 +11,8 @@
     "start": "deno run --env-file=.env --allow-read --allow-net --allow-env src/main.ts",
     "migrate": "deno run --env-file=.env --allow-read --allow-net --allow-env src/db/migrate.ts",
     "backfill-actors": "deno run --env-file=.env --allow-read --allow-net --allow-env src/db/backfill-actors.ts",
-    "check": "deno check src/main.ts",
+    "publish-outbox": "deno run --env-file=.env --allow-read --allow-net --allow-env src/db/publish-outbox.ts",
+    "check": "deno check src/main.ts src/endpoint/v2/*.ts src/services/*.ts src/db/*.ts src/config/*.ts",
     "fmt": "deno fmt",
     "lint": "deno lint"
   }

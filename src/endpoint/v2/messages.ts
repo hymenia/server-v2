@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { sql } from "../../db/client.ts";
 import { getAuthUser } from "../../services/auth.ts";
 import { sendToActors } from "../../services/hub.ts";
+import { hasPermission, PERMISSIONS } from "../../services/permissions.ts";
 
 const app = new Hono();
 
@@ -235,9 +236,11 @@ app.delete("/:messageId", async c => {
             return c.json({ error: "Message not found" }, 404);
         }
 
-        // only the author may delete their own message
+        // the author may always delete their own message, otherwise messages.delete is required
         if (existing.author_actor_id !== auth.actor.id) {
-            return c.json({ error: "Not allowed" }, 403);
+            if (!(await hasPermission(spaceId, auth.actor.id, PERMISSIONS.messagesDelete))) {
+                return c.json({ error: "Not allowed" }, 403);
+            }
         }
 
         const rows = await sql<{ id: string }[]>`

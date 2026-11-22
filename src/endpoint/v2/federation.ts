@@ -1,8 +1,12 @@
 import { Hono } from "hono";
+import type { JSONValue } from "postgres";
 import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 import { signMessage, verifyMessageWithPublicKey } from "../../services/fedi-crypto.ts";
 import { getTrustedServer } from "../../services/fedi-trust.ts";
+import { ensureRemoteActor } from "../../services/actors.ts";
+import { acceptInvite } from "../../services/invites.ts";
+import { enqueueOutbox, signEnvelope, verifyFederationRequest } from "../../services/federation.ts";
 
 const app = new Hono();
 
@@ -269,6 +273,108 @@ app.post("/ping", async c => {
             },
             500,
         );
+    }
+});
+
+// POST /v2/federation/inbox
+// stores a signed event from a trusted server for later processing
+app.post("/inbox", async c => {
+    try {
+        const verified = await verifyFederationRequest(c, "hymenia.event");
+
+        if (!verified.ok) {
+            return c.json({ error: verified.error }, verified.status as 400);
+        }
+
+        const signature = c.req.header("X-Hymenia-Signature") ?? "";
+        const base64 = signature.replaceAll("-", "+").replaceAll("_", "/");
+        const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+        const signatureBytes = Uint8Array.from(atob(padded), char => char.charCodeAt(0));
+
+        await sql`
+            INSERT INTO "v2".federation_inbox (
+                origin, request_id, key_id, event_type, payload, signature
+            )
+            VALUES (
+                ${verified.envelope.origin},
+                ${verified.envelope.request_id}::uuid,
+                ${"default"},
+                ${String(verified.envelope.payload.event_type ?? "unknown")},
+                ${sql.json(verified.envelope.payload as JSONValue)},
+                ${signatureBytes}
+            )
+            ON CONFLICT (origin, request_id) DO NOTHING
+        `;
+
+        c.header("Cache-Control", "no-store");
+        return c.json({ success: true });
+    } catch (error) {
+        console.error("Inbox store failed:", error);
+        return c.json({ error: "Inbox store failed" }, 500);
+    }
+});
+
+// POST /v2/federation/invites/accept
+// a remote actor redeems an invite on this server
+app.post("/invites/accept", async c => {
+    try {
+        const verified = await verifyFederationRequest(c, "hymenia.invite.accept");
+
+        if (!verified.ok) {
+            return c.json({ error: verified.error }, verified.status as 400);
+        }
+
+        const code = typeof verified.envelope.payload.code === "string"
+            ? verified.envelope.payload.code
+            : "";
+        const actorUri = typeof verified.envelope.payload.actor_uri === "string"
+            ? verified.envelope.payload.actor_uri
+            : "";
+
+        if (!code || !actorUri) {
+            return c.json({ error: "Invalid payload" }, 400);
+        }
+
+        const actor = await ensureRemoteActor(actorUri);
+
+        if (!actor) {
+            return c.json({ error: "Invalid actor uri" }, 400);
+        }
+
+        // the actor must belong to the server that signed the request
+        if (new URL(actorUri).host.toLowerCase() !== new URL(verified.envelope.origin).host.toLowerCase()) {
+            return c.json({ error: "Actor does not match origin" }, 403);
+        }
+
+        const result = await acceptInvite(code, actor.id);
+
+        if (!result.ok) {
+            return c.json({ error: result.error }, result.status as 400);
+        }
+
+        if (!result.alreadyMember) {
+            await enqueueOutbox(
+                "space.member.joined",
+                `${SERVER_ORIGIN}/spaces/${result.spaceId}`,
+                actor.actor_uri,
+                { space_id: result.spaceId, actor_uri: actor.actor_uri },
+            );
+        }
+
+        const response = await signEnvelope("hymenia.invite.accept.response", verified.envelope.request_id, {
+            space_id: result.spaceId,
+            actor_uri: actor.actor_uri,
+            already_member: result.alreadyMember,
+        });
+
+        c.header("Content-Type", "application/json; charset=utf-8");
+        c.header("Cache-Control", "no-store");
+        c.header("X-Hymenia-Signature", response.signature);
+
+        return c.body(response.body, 200);
+    } catch (error) {
+        console.error("Federated invite accept failed:", error);
+        return c.json({ error: "Federated invite accept failed" }, 500);
     }
 });
 

@@ -4,6 +4,7 @@ import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 import { getAuthUser } from "../../services/auth.ts";
 import { signMessage } from "../../services/fedi-crypto.ts";
+import { hasPermission, PERMISSIONS } from "../../services/permissions.ts";
 
 const app = new Hono();
 
@@ -184,6 +185,10 @@ app.post("/spaces/:spaceId/chats", async c => {
 
         if (!(await isSpaceMember(spaceId, auth.actor.id))) {
             return c.json({ error: "Space not found" }, 404);
+        }
+
+        if (!(await hasPermission(spaceId, auth.actor.id, PERMISSIONS.channelsCreate))) {
+            return c.json({ error: "Not allowed" }, 403);
         }
 
         const body = await readBody(c);
@@ -435,9 +440,9 @@ app.patch("/chats/:chatId", async c => {
                 return null;
             }
 
-            // for now only creator or space owner can edit
-            // later replace with real permission check
-            //TODO TODO TODO TODO TODO TODO TODO TODO AAAGH
+            if (!(await hasPermission(current.space_id, auth.actor.id, PERMISSIONS.channelsManage))) {
+                return null;
+            }
 
             const space = await tx`
                 select owner_actor_id
@@ -542,6 +547,10 @@ app.delete("/chats/:chatId", async c => {
             if (!chat) return null;
 
             if (!(await isSpaceMember(chat.space_id, auth.actor.id))) {
+                return null;
+            }
+
+            if (!(await hasPermission(chat.space_id, auth.actor.id, PERMISSIONS.channelsManage))) {
                 return null;
             }
 

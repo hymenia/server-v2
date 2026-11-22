@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 import { signMessage } from "../../services/fedi-crypto.ts";
+import { DEFAULT_ROLE_PERMISSIONS, OWNER_ROLE_PERMISSIONS, hasPermission, PERMISSIONS } from "../../services/permissions.ts";
 
 const app = new Hono();
 
@@ -274,10 +275,34 @@ app.post("/", async c => {
             const created = rows[0];
             if (!created) throw new Error("Space creation failed");
 
+            // owner role holds every permission and is assigned to the creator
+            const ownerRoleId = crypto.randomUUID();
+
+            await tx`
+                INSERT INTO "v2".space_roles (id, space_id, name, is_default, position)
+                VALUES (${ownerRoleId}::uuid, ${spaceId}::uuid, 'owner', FALSE, 100)
+            `;
+
             await tx`
                 INSERT INTO "v2".space_roles (id, space_id, name, is_default, position)
                 VALUES (${roleId}::uuid, ${spaceId}::uuid, 'member', TRUE, 0)
             `;
+
+            for (const permissionId of OWNER_ROLE_PERMISSIONS) {
+                await tx`
+                    INSERT INTO "v2".space_role_permissions (space_id, role_id, permission_id)
+                    VALUES (${spaceId}::uuid, ${ownerRoleId}::uuid, ${permissionId})
+                    ON CONFLICT (role_id, permission_id) DO NOTHING
+                `;
+            }
+
+            for (const permissionId of DEFAULT_ROLE_PERMISSIONS) {
+                await tx`
+                    INSERT INTO "v2".space_role_permissions (space_id, role_id, permission_id)
+                    VALUES (${spaceId}::uuid, ${roleId}::uuid, ${permissionId})
+                    ON CONFLICT (role_id, permission_id) DO NOTHING
+                `;
+            }
 
             await tx`
                 INSERT INTO "v2".space_members (space_id, actor_id, membership_status)
@@ -291,7 +316,7 @@ app.post("/", async c => {
                 VALUES (
                     ${spaceId}::uuid,
                     ${auth.actor.id}::uuid,
-                    ${roleId}::uuid,
+                    ${ownerRoleId}::uuid,
                     ${auth.actor.id}::uuid
                 )
             `;
@@ -420,6 +445,10 @@ app.patch("/:spaceId", async c => {
             return c.json({ error: "Invalid visibility" }, 400);
         }
 
+        if (!(await hasPermission(spaceId, auth.actor.id, PERMISSIONS.spaceManage))) {
+            return c.json({ error: "Not allowed" }, 403);
+        }
+
         const eventId = crypto.randomUUID();
 
         const space = await sql.begin(async tx => {
@@ -523,6 +552,10 @@ app.delete("/:spaceId", async c => {
         const spaceId = c.req.param("spaceId");
         if (!isValidUuid(spaceId)) {
             return c.json({ error: "Invalid space id" }, 400);
+        }
+
+        if (!(await hasPermission(spaceId, auth.actor.id, PERMISSIONS.spaceManage))) {
+            return c.json({ error: "Not allowed" }, 403);
         }
 
         const eventId = crypto.randomUUID();
