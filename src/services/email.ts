@@ -75,7 +75,7 @@ export async function sendVerificationEmail(
   token: string,
 ): Promise<void> {
   const verificationUrl = new URL(
-    "/api/v2/auth/verify-email",
+    "/v2/auth/verify-email",
     config.baseUrl,
   );
 

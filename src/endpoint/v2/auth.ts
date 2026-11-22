@@ -336,6 +336,48 @@ auth.post("/logout", async c => {
     }
 });
 
+// POST /v2/auth/resend-verification
+auth.post("/resend-verification", async c => {
+    let body: { email?: unknown };
+
+    try {
+        body = (await c.req.json()) as { email?: unknown };
+    } catch {
+        return c.json({ error: "Invalid JSON" }, 400);
+    }
+
+    const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+
+    if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return c.json({ error: "Provide a valid email address" }, 400);
+    }
+
+    c.header("Cache-Control", "no-store");
+
+    try {
+        const rows = await sql<{ id: string; email: string }[]>`
+      SELECT id, email
+      FROM users
+      WHERE LOWER(email) = ${email}
+        AND email_verified_at IS NULL
+      LIMIT 1
+    `;
+
+        const user = rows[0];
+
+        if (user?.email) {
+            await createEmailVerification(sql, user.id, user.email);
+        }
+    } catch (error) {
+        console.error("Resend verification failed:", error);
+    }
+
+    // same answer either way so this does not reveal which accounts exist
+    return c.json({
+        message: "If that address needs verification, a new link has been sent.",
+    });
+});
+
 // GET /v2/auth/verify-email?token=...
 auth.get("/verify-email", async c => {
     const token = c.req.query("token");
