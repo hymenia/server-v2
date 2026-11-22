@@ -11,6 +11,7 @@ interface MessageRow {
     author_actor_id: string;
     content: string;
     created_at: string | Date;
+    edited_at: string | Date | null;
 }
 
 function isValidUuid(value: string): boolean {
@@ -24,6 +25,7 @@ function toMessageDto(row: MessageRow) {
         authorActorId: row.author_actor_id,
         content: row.content,
         createdAt: new Date(row.created_at).toISOString(),
+        editedAt: row.edited_at ? new Date(row.edited_at).toISOString() : null,
     };
 }
 
@@ -79,7 +81,7 @@ app.post("/chats/:chatId", async c => {
         const rows = await sql<MessageRow[]>`
             insert into "v2".messages (id, channel_id, author_actor_id, content)
             values (${crypto.randomUUID()}::uuid, ${chatId}::uuid, ${auth.actor.id}::uuid, ${content})
-            returning id, channel_id, author_actor_id, content, created_at
+            returning id, channel_id, author_actor_id, content, created_at, edited_at
         `;
         const message = rows[0];
         if (!message) throw new Error("Message insert failed");
@@ -123,7 +125,7 @@ app.get("/chats/:chatId", async c => {
         const before = beforeRaw && !Number.isNaN(Date.parse(beforeRaw)) ? new Date(beforeRaw) : null;
 
         const rows = await sql<MessageRow[]>`
-            select id, channel_id, author_actor_id, content, created_at
+            select id, channel_id, author_actor_id, content, created_at, edited_at
             from "v2".messages
             where channel_id = ${chatId}::uuid
               and deleted_at is null
@@ -137,6 +139,130 @@ app.get("/chats/:chatId", async c => {
     } catch (error) {
         console.error("Message list failed:", error);
         return c.json({ error: "Couldn't load messages" }, 500);
+    }
+});
+
+// PATCH /v2/messages/:messageId
+app.patch("/:messageId", async c => {
+    try {
+        const auth = await getAuthUser(c);
+        if (!auth) return c.json({ error: "Not authenticated" }, 401);
+
+        const messageId = c.req.param("messageId");
+        if (!isValidUuid(messageId)) return c.json({ error: "Invalid message id" }, 400);
+
+        let body: unknown;
+        try {
+            body = await c.req.json();
+        } catch {
+            return c.json({ error: "Invalid request body" }, 400);
+        }
+
+        const content =
+            typeof (body as { content?: unknown })?.content === "string"
+                ? (body as { content: string }).content.trim()
+                : "";
+        if (content.length < 1 || content.length > 4000) {
+            return c.json({ error: "Invalid content" }, 400);
+        }
+
+        const found = await sql<{ channel_id: string; author_actor_id: string }[]>`
+            select channel_id, author_actor_id from "v2".messages
+            where id = ${messageId}::uuid and deleted_at is null
+            limit 1
+        `;
+        const existing = found[0];
+        if (!existing) return c.json({ error: "Message not found" }, 404);
+
+        const spaceId = await getChatSpace(existing.channel_id);
+        if (!spaceId || !(await isSpaceMember(spaceId, auth.actor.id))) {
+            return c.json({ error: "Message not found" }, 404);
+        }
+
+        // only the author may edit their own message
+        if (existing.author_actor_id !== auth.actor.id) {
+            return c.json({ error: "Not allowed" }, 403);
+        }
+
+        const rows = await sql<MessageRow[]>`
+            update "v2".messages
+            set content = ${content}, edited_at = now()
+            where id = ${messageId}::uuid and deleted_at is null
+            returning id, channel_id, author_actor_id, content, created_at, edited_at
+        `;
+        const message = rows[0];
+        if (!message) return c.json({ error: "Message not found" }, 404);
+
+        const dto = toMessageDto(message);
+
+        const members = await sql<{ actor_id: string }[]>`
+            select actor_id from "v2".space_members
+            where space_id = ${spaceId}::uuid and membership_status = 'active'
+        `;
+        sendToActors(
+            members.map(m => m.actor_id),
+            "message.updated",
+            dto,
+        );
+
+        c.header("Cache-Control", "no-store");
+        return c.json({ message: dto });
+    } catch (error) {
+        console.error("Message edit failed:", error);
+        return c.json({ error: "Message edit failed" }, 500);
+    }
+});
+
+// DELETE /v2/messages/:messageId
+app.delete("/:messageId", async c => {
+    try {
+        const auth = await getAuthUser(c);
+        if (!auth) return c.json({ error: "Not authenticated" }, 401);
+
+        const messageId = c.req.param("messageId");
+        if (!isValidUuid(messageId)) return c.json({ error: "Invalid message id" }, 400);
+
+        const found = await sql<{ channel_id: string; author_actor_id: string }[]>`
+            select channel_id, author_actor_id from "v2".messages
+            where id = ${messageId}::uuid and deleted_at is null
+            limit 1
+        `;
+        const existing = found[0];
+        if (!existing) return c.json({ error: "Message not found" }, 404);
+
+        const spaceId = await getChatSpace(existing.channel_id);
+        if (!spaceId || !(await isSpaceMember(spaceId, auth.actor.id))) {
+            return c.json({ error: "Message not found" }, 404);
+        }
+
+        // only the author may delete their own message
+        if (existing.author_actor_id !== auth.actor.id) {
+            return c.json({ error: "Not allowed" }, 403);
+        }
+
+        const rows = await sql<{ id: string }[]>`
+            update "v2".messages
+            set deleted_at = now()
+            where id = ${messageId}::uuid and deleted_at is null
+            returning id
+        `;
+        if (rows.length !== 1) return c.json({ error: "Message not found" }, 404);
+
+        const members = await sql<{ actor_id: string }[]>`
+            select actor_id from "v2".space_members
+            where space_id = ${spaceId}::uuid and membership_status = 'active'
+        `;
+        sendToActors(
+            members.map(m => m.actor_id),
+            "message.deleted",
+            { id: messageId, chatId: existing.channel_id },
+        );
+
+        c.header("Cache-Control", "no-store");
+        return c.json({ success: true });
+    } catch (error) {
+        console.error("Message delete failed:", error);
+        return c.json({ error: "Message delete failed" }, 500);
     }
 });
 
