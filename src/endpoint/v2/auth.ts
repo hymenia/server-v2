@@ -4,6 +4,7 @@ import { SERVER_DOMAIN, SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 import { COOKIE, findUser, hash, type PublicUser, readToken } from "../../services/auth.ts";
 import { createEmailVerification, verifyEmail } from "../../services/email.ts";
+import { rateLimit } from "../../services/rate-limit.ts";
 
 const auth = new Hono();
 
@@ -131,7 +132,7 @@ async function createSession(c: Context, userId: string): Promise<void> {
 }
 
 // POST /v2/auth/register
-auth.post("/register", async c => {
+auth.post("/register", rateLimit({ bucket: "register", limit: 5, windowMs: 15 * 60 * 1000 }), async c => {
     let body: RegisterBody;
 
     try {
@@ -238,7 +239,7 @@ auth.post("/register", async c => {
 });
 
 // POST /v2/auth/login
-auth.post("/login", async c => {
+auth.post("/login", rateLimit({ bucket: "login", limit: 10, windowMs: 15 * 60 * 1000 }), async c => {
     let body: LoginBody;
 
     try {
@@ -337,7 +338,7 @@ auth.post("/logout", async c => {
 });
 
 // POST /v2/auth/resend-verification
-auth.post("/resend-verification", async c => {
+auth.post("/resend-verification", rateLimit({ bucket: "resend", limit: 3, windowMs: 15 * 60 * 1000 }), async c => {
     let body: { email?: unknown };
 
     try {
