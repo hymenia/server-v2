@@ -7,8 +7,10 @@
     "postgres": "npm:postgres@^3"
   },
   "tasks": {
-    "dev": "deno run --watch --env-file=.env --allow-read --allow-net --allow-env=DATABASE_URL src/main.ts",
-    "start": "deno run --env-file=.env --allow-read --allow-net --allow-env=DATABASE_URL src/main.ts",
+    "dev": "deno run --watch --env-file=.env --allow-read --allow-net --allow-env src/main.ts",
+    "start": "deno run --env-file=.env --allow-read --allow-net --allow-env src/main.ts",
+    "migrate": "deno run --env-file=.env --allow-read --allow-net --allow-env src/db/migrate.ts",
+    "backfill-actors": "deno run --env-file=.env --allow-read --allow-net --allow-env src/db/backfill-actors.ts",
     "check": "deno check src/main.ts",
     "fmt": "deno fmt",
     "lint": "deno lint"

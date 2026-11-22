@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { SERVER_DOMAIN, SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 import { COOKIE, findUser, hash, type PublicUser, readToken } from "../../services/auth.ts";
 import { createEmailVerification, verifyEmail } from "../../services/email.ts";
@@ -165,22 +166,40 @@ auth.post("/register", async c => {
         );
     }
 
+    const passwordHash = await hashPassword(password);
+    const actorUri = `${SERVER_ORIGIN}/actors/${username}`;
+
     try {
-        const rows = await sql<PublicUser[]>`
+        const user = await sql.begin(async tx => {
+            const rows = await tx<PublicUser[]>`
       INSERT INTO users (username, email, password_hash)
       VALUES (
         ${username},
         ${email},
-        ${await hashPassword(password)}
+        ${passwordHash}
       )
       RETURNING id, username, email
     `;
 
-        const user = rows[0];
+            const inserted = rows[0];
 
-        if (!user) {
-            throw new Error("User INSERT returned no row");
-        }
+            if (!inserted) {
+                throw new Error("User INSERT returned no row");
+            }
+
+            // every local user needs an actor row, or every /v2 route doesnt work
+            await tx`
+        INSERT INTO "v2".actors (actor_uri, host, username, local_user_id)
+        VALUES (
+          ${actorUri},
+          ${SERVER_DOMAIN.toLowerCase()},
+          ${username},
+          ${inserted.id}::uuid
+        )
+      `;
+
+            return inserted;
+        });
 
         try {
             await createEmailVerification(sql, user.id, email);
