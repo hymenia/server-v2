@@ -5,6 +5,7 @@ import { sql } from "../../db/client.ts";
 import { COOKIE, findUser, hash, type PublicUser, readToken } from "../../services/auth.ts";
 import { createEmailVerification, verifyEmail } from "../../services/email.ts";
 import { rateLimit } from "../../services/rate-limit.ts";
+import { createAltchaChallenge, verifyAltchaPayload } from "../../services/altcha.ts";
 
 const auth = new Hono();
 
@@ -19,11 +20,13 @@ interface RegisterBody {
     username?: unknown;
     email?: unknown;
     password?: unknown;
+    altcha?: unknown;
 }
 
 interface LoginBody {
     login?: unknown;
     password?: unknown;
+    altcha?: unknown;
 }
 
 function normalizeUsername(value: string): string {
@@ -131,6 +134,23 @@ async function createSession(c: Context, userId: string): Promise<void> {
     setCookie(c, token);
 }
 
+// GET /v2/auth/altcha/challenge
+auth.get("/altcha/challenge", async c => {
+    try {
+        const challenge = await createAltchaChallenge();
+
+        if (!challenge) {
+            return c.json({ error: "Captcha is not configured" }, 503);
+        }
+
+        c.header("Cache-Control", "no-store");
+        return c.json(challenge);
+    } catch (error) {
+        console.error("Altcha challenge failed:", error);
+        return c.json({ error: "Could not create challenge" }, 500);
+    }
+});
+
 // POST /v2/auth/register
 auth.post("/register", rateLimit({ bucket: "register", limit: 5, windowMs: 15 * 60 * 1000 }), async c => {
     let body: RegisterBody;
@@ -165,6 +185,10 @@ auth.post("/register", rateLimit({ bucket: "register", limit: 5, windowMs: 15 * 
             },
             400,
         );
+    }
+
+    if (!(await verifyAltchaPayload(body.altcha))) {
+        return c.json({ error: "Captcha verification failed" }, 400);
     }
 
     const passwordHash = await hashPassword(password);
@@ -253,6 +277,10 @@ auth.post("/login", rateLimit({ bucket: "login", limit: 10, windowMs: 15 * 60 * 
 
     if (loginInput.trim().length === 0 || loginInput.length > 254 || password.length > 1024) {
         return c.json({ error: "Invalid username/email or password" }, 401);
+    }
+
+    if (!(await verifyAltchaPayload(body?.altcha))) {
+        return c.json({ error: "Captcha verification failed" }, 400);
     }
 
     try {

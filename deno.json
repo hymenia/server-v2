@@ -2,6 +2,7 @@
 {
   "imports": {
     "@hono/deno": "npm:@hono/deno@^1.0.3",
+    "altcha-lib": "npm:altcha-lib@2.10.0",
     "hono": "npm:hono@^4.13.14",
     "nodemailer": "npm:nodemailer@^10.2.1",
     "postgres": "npm:postgres@^3"
