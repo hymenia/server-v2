@@ -1,11 +1,12 @@
+import { compare as compareBcrypt } from "bcryptjs";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { SERVER_DOMAIN, SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
+import { createAltchaChallenge, verifyAltchaPayload } from "../../services/altcha.ts";
 import { COOKIE, findUser, hash, type PublicUser, readToken } from "../../services/auth.ts";
 import { createEmailVerification, verifyEmail } from "../../services/email.ts";
 import { rateLimit } from "../../services/rate-limit.ts";
-import { createAltchaChallenge, verifyAltchaPayload } from "../../services/altcha.ts";
 
 const auth = new Hono();
 
@@ -65,7 +66,19 @@ async function hashPassword(password: string): Promise<string> {
     return `pbkdf2$${hex(salt)}$${hex(new Uint8Array(bits))}`;
 }
 
+// v1 accounts store bcryptjs hashes, v2 stores pbkdf2
+// this is just so users dont have to change their password
+const BCRYPT_HASH = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
+    if (BCRYPT_HASH.test(stored)) {
+        try {
+            return await compareBcrypt(password, stored);
+        } catch {
+            return false;
+        }
+    }
+
     const parts = stored.split("$");
     if (parts.length !== 3 || parts[0] !== "pbkdf2") return false;
 
@@ -300,6 +313,19 @@ auth.post("/login", rateLimit({ bucket: "login", limit: 10, windowMs: 15 * 60 * 
 
         if (!user || !(await verifyPassword(password, user.password_hash))) {
             return c.json({ error: "Invalid username/email or password" }, 401);
+        }
+
+        // upgrade a v1 bcrypt hash to the v2 format on the first successful login
+        if (BCRYPT_HASH.test(user.password_hash)) {
+            try {
+                await sql`
+          UPDATE users
+          SET password_hash = ${await hashPassword(password)}
+          WHERE id = ${user.id}
+        `;
+            } catch (error) {
+                console.error("Password rehash failed:", error);
+            }
         }
 
         if (!user.email_verified_at) {
