@@ -49,11 +49,15 @@ try {
     `;
 
         if (existing.length > 0) {
-            console.log(`SKIP ${migration.name}`);
-            continue;
-        }
+            if (existing[0].checksum === checksum) {
+                console.log(`SKIP ${migration.name}`);
+                continue;
+            }
 
-        console.log(`APPLY ${migration.name}`);
+            console.log(`REAPPLY ${migration.name} (checksum changed)`);
+        } else {
+            console.log(`APPLY ${migration.name}`);
+        }
 
         await sql.begin(async tx => {
             await tx.unsafe(source);
@@ -61,6 +65,9 @@ try {
             await tx`
         INSERT INTO schema_migrations (name, checksum)
         VALUES (${migration.name}, ${checksum})
+        ON CONFLICT (name) DO UPDATE
+        SET checksum = EXCLUDED.checksum,
+            applied_at = NOW()
       `;
         });
 

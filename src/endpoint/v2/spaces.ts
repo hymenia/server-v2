@@ -2,8 +2,13 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
-import { signMessage } from "../../services/fedi-crypto.ts";
-import { DEFAULT_ROLE_PERMISSIONS, OWNER_ROLE_PERMISSIONS, hasPermission, PERMISSIONS } from "../../services/permissions.ts";
+import { createSignedEvent } from "../../services/federation.ts";
+import {
+    DEFAULT_ROLE_PERMISSIONS,
+    hasPermission,
+    OWNER_ROLE_PERMISSIONS,
+    PERMISSIONS,
+} from "../../services/permissions.ts";
 
 const app = new Hono();
 
@@ -43,22 +48,6 @@ interface SpaceBody {
     name?: unknown;
     description?: unknown;
     visibility?: unknown;
-}
-
-function canonicalize(value: unknown): string {
-    if (value === null || typeof value !== "object") {
-        return JSON.stringify(value);
-    }
-    if (Array.isArray(value)) {
-        return "[" + value.map(canonicalize).join(",") + "]";
-    }
-
-    const entries = Object.entries(value as Record<string, unknown>)
-        .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([k, v]) => JSON.stringify(k) + ":" + canonicalize(v));
-
-    return "{" + entries.join(",") + "}";
 }
 
 class ForbiddenError extends Error {
@@ -165,31 +154,6 @@ async function readBody(c: Context): Promise<SpaceBody | null> {
     } catch {
         return null;
     }
-}
-
-async function createSignedEvent(
-    eventType: string,
-    eventId: string,
-    objectUri: string,
-    actorUri: string,
-    payload: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-    const event = {
-        id: eventId,
-        type: eventType,
-        origin: SERVER_ORIGIN,
-        actor: actorUri,
-        object: objectUri,
-        timestamp: new Date().toISOString(),
-        payload,
-    };
-
-    const signature = await signMessage(canonicalize(event));
-
-    return {
-        ...event,
-        signature,
-    };
 }
 
 async function getSpace(spaceId: string): Promise<SpaceRow | null> {
@@ -339,7 +303,7 @@ app.post("/", async c => {
                     'space.created',
                     ${federationUri},
                     ${auth.actor.actor_uri},
-                    ${JSON.stringify(signedEvent)}::jsonb
+                    ${tx.json(signedEvent)}
                 )
             `;
 
@@ -519,7 +483,7 @@ app.patch("/:spaceId", async c => {
                     'space.updated',
                     ${updated.federation_uri},
                     ${auth.actor.actor_uri},
-                    ${JSON.stringify(signedEvent)}::jsonb
+                    ${tx.json(signedEvent)}
                 )
             `;
 
@@ -618,7 +582,7 @@ app.delete("/:spaceId", async c => {
                     'space.deleted',
                     ${space.federation_uri},
                     ${auth.actor.actor_uri},
-                    ${JSON.stringify(signedEvent)}::jsonb
+                    ${tx.json(signedEvent)}
                 )
             `;
 

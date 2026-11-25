@@ -1,4 +1,3 @@
-import { compare as compareBcrypt } from "bcryptjs";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { SERVER_DOMAIN, SERVER_ORIGIN } from "../../config/server.ts";
@@ -6,6 +5,7 @@ import { sql } from "../../db/client.ts";
 import { createAltchaChallenge, verifyAltchaPayload } from "../../services/altcha.ts";
 import { COOKIE, findUser, hash, type PublicUser, readToken } from "../../services/auth.ts";
 import { createEmailVerification, verifyEmail } from "../../services/email.ts";
+import { hashPassword, isBcryptHash, verifyPassword } from "../../services/password.ts";
 import { rateLimit } from "../../services/rate-limit.ts";
 
 const auth = new Hono();
@@ -38,87 +38,8 @@ function isValidUsername(username: string): boolean {
     return /^[a-z0-9_]+(?:\.[a-z0-9_]+)*$/.test(username) && username.length >= 3 && username.length <= 30;
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-    const buffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(buffer).set(bytes);
-    return buffer;
-}
-
 function randomToken(): string {
     return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function hashPassword(password: string): Promise<string> {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-
-    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
-        "deriveBits",
-    ]);
-
-    const bits = await crypto.subtle.deriveBits(
-        { name: "PBKDF2", hash: "SHA-256", salt: toArrayBuffer(salt), iterations: 600_000 },
-        key,
-        256,
-    );
-
-    const hex = (bytes: Uint8Array) => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
-
-    return `pbkdf2$${hex(salt)}$${hex(new Uint8Array(bits))}`;
-}
-
-// v1 accounts store bcryptjs hashes, v2 stores pbkdf2
-// this is just so users dont have to change their password
-const BCRYPT_HASH = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
-
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-    if (BCRYPT_HASH.test(stored)) {
-        try {
-            return await compareBcrypt(password, stored);
-        } catch {
-            return false;
-        }
-    }
-
-    const parts = stored.split("$");
-    if (parts.length !== 3 || parts[0] !== "pbkdf2") return false;
-
-    const saltHex = parts[1];
-    const expectedHex = parts[2];
-
-    if (!saltHex || !expectedHex || !/^[0-9a-f]{32}$/.test(saltHex) || !/^[0-9a-f]{64}$/.test(expectedHex)) {
-        return false;
-    }
-
-    const fromHex = (value: string): Uint8Array =>
-        new Uint8Array((value.match(/.{2}/g) ?? []).map(x => parseInt(x, 16)));
-
-    const salt = fromHex(saltHex);
-    const expected = fromHex(expectedHex);
-
-    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
-        "deriveBits",
-    ]);
-
-    const bits = await crypto.subtle.deriveBits(
-        {
-            name: "PBKDF2",
-            hash: "SHA-256",
-            salt: toArrayBuffer(salt),
-            iterations: 600_000,
-        },
-        key,
-        256,
-    );
-
-    const actual = new Uint8Array(bits);
-
-    let difference = actual.length ^ expected.length;
-
-    for (let i = 0; i < Math.min(actual.length, expected.length); i++) {
-        difference |= (actual[i] ?? 0) ^ (expected[i] ?? 0);
-    }
-
-    return difference === 0;
 }
 
 function setCookie(c: Context, token: string) {
@@ -316,7 +237,7 @@ auth.post("/login", rateLimit({ bucket: "login", limit: 10, windowMs: 15 * 60 * 
         }
 
         // upgrade a v1 bcrypt hash to the v2 format on the first successful login
-        if (BCRYPT_HASH.test(user.password_hash)) {
+        if (isBcryptHash(user.password_hash)) {
             try {
                 await sql`
           UPDATE users

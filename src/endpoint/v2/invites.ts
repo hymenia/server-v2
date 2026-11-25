@@ -64,9 +64,7 @@ app.post("/", async c => {
             return c.json({ error: "Not allowed" }, 403);
         }
 
-        const maxUses = body.maxUses === undefined || body.maxUses === null
-            ? null
-            : Number(body.maxUses);
+        const maxUses = body.maxUses === undefined || body.maxUses === null ? null : Number(body.maxUses);
 
         if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 1000)) {
             return c.json({ error: "Invalid maxUses" }, 400);
@@ -129,27 +127,28 @@ app.post("/", async c => {
         const invite = rows[0];
         if (!invite) throw new Error("Invite insert failed");
 
-        await enqueueOutbox(
-            "invite.created",
-            `${SERVER_ORIGIN}/invites/${invite.id}`,
-            auth.actor.actor_uri,
-            { space_id: spaceId, invite_id: invite.id },
-        );
+        await enqueueOutbox("invite.created", `${SERVER_ORIGIN}/invites/${invite.id}`, auth.actor.actor_uri, {
+            space_id: spaceId,
+            invite_id: invite.id,
+        });
 
         c.header("Cache-Control", "no-store");
 
         // the plaintext code is returned once and never stored
-        return c.json({
-            invite: {
-                id: invite.id,
-                spaceId,
-                code,
-                maxUses,
-                usesCount: 0,
-                expiresAt: expiresAt ? expiresAt.toISOString() : null,
-                createdAt: new Date(invite.created_at).toISOString(),
+        return c.json(
+            {
+                invite: {
+                    id: invite.id,
+                    spaceId,
+                    code,
+                    maxUses,
+                    usesCount: 0,
+                    expiresAt: expiresAt ? expiresAt.toISOString() : null,
+                    createdAt: new Date(invite.created_at).toISOString(),
+                },
             },
-        }, 201);
+            201,
+        );
     } catch (error) {
         console.error("Invite create failed:", error);
         return c.json({ error: "Invite create failed" }, 500);
@@ -169,14 +168,16 @@ app.get("/", async c => {
             return c.json({ error: "Space not found" }, 404);
         }
 
-        const rows = await sql<{
-            id: string;
-            max_uses: number | null;
-            uses_count: number;
-            expires_at: string | Date | null;
-            revoked_at: string | Date | null;
-            created_at: string | Date;
-        }[]>`
+        const rows = await sql<
+            {
+                id: string;
+                max_uses: number | null;
+                uses_count: number;
+                expires_at: string | Date | null;
+                revoked_at: string | Date | null;
+                created_at: string | Date;
+            }[]
+        >`
             SELECT id, max_uses, uses_count, expires_at, revoked_at, created_at
             FROM "v2".space_invites
             WHERE space_id = ${spaceId}::uuid

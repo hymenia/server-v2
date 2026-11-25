@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Users
@@ -18,6 +16,56 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT users_host_lowercase
         CHECK (host IS NULL OR host = LOWER(host))
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS host TEXT;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(254);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'users_host_lowercase'
+          AND conrelid = 'public.users'::regclass
+    ) THEN
+        ALTER TABLE public.users
+            ADD CONSTRAINT users_host_lowercase
+            CHECK (host IS NULL OR host = LOWER(host));
+    END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    clashes TEXT;
+BEGIN
+    SELECT string_agg(LOWER(username) || ' (' || n || ' rows)', ', ')
+    INTO clashes
+    FROM (
+        SELECT LOWER(username) AS username, COUNT(*) AS n
+        FROM public.users
+        GROUP BY LOWER(username)
+        HAVING COUNT(*) > 1
+    ) dupes;
+
+    IF clashes IS NOT NULL THEN
+        RAISE EXCEPTION
+            'duplicate usernames that differ only by case: %. rename them before migrating.',
+            clashes;
+    END IF;
+END
+$$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_host_unique
     ON users (LOWER(username), COALESCE(host, ''));
@@ -460,7 +508,7 @@ CREATE TABLE IF NOT EXISTS "v2".channel_role_access (
 CREATE INDEX IF NOT EXISTS channel_role_access_role_idx
 ON "v2".channel_role_access (space_id, role_id);
 
-create table "v2".messages (
+create table if not exists "v2".messages (
     id uuid primary key,
     channel_id uuid not null references "v2".channels(id) on delete cascade,
     author_actor_id uuid not null references "v2".actors(id),
@@ -470,6 +518,5 @@ create table "v2".messages (
     deleted_at timestamptz
 );
 
-create index on "v2".messages (channel_id, created_at desc, id desc);
-
-COMMIT;
+create index if not exists messages_channel_created_idx
+on "v2".messages (channel_id, created_at desc, id desc);

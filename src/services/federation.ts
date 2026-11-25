@@ -145,6 +145,48 @@ export async function verifyFederationRequest(c: Context, expectedType: string):
     return { ok: true, envelope, rawBody };
 }
 
+// both sides must hash the same bytes
+export function canonicalize(value: unknown): string {
+    if (value === null || typeof value !== "object") {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return "[" + value.map(canonicalize).join(",") + "]";
+    }
+
+    const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => JSON.stringify(k) + ":" + canonicalize(v));
+
+    return "{" + entries.join(",") + "}";
+}
+
+export async function createSignedEvent(
+    eventType: string,
+    eventId: string,
+    objectUri: string,
+    actorUri: string,
+    payload: Record<string, unknown>,
+): Promise<JSONValue> {
+    const event = {
+        id: eventId,
+        type: eventType,
+        origin: SERVER_ORIGIN,
+        actor: actorUri,
+        object: objectUri,
+        timestamp: new Date().toISOString(),
+        payload,
+    };
+
+    const signature = await signMessage(canonicalize(event));
+
+    return {
+        ...event,
+        signature,
+    } as JSONValue;
+}
+
 export async function signEnvelope(
     type: string,
     requestId: string,

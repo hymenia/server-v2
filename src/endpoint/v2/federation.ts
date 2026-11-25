@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import type { JSONValue } from "postgres";
 import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
+import { ensureRemoteActor } from "../../services/actors.ts";
+import { enqueueOutbox, signEnvelope, verifyFederationRequest } from "../../services/federation.ts";
 import { signMessage, verifyMessageWithPublicKey } from "../../services/fedi-crypto.ts";
 import { getTrustedServer } from "../../services/fedi-trust.ts";
-import { ensureRemoteActor } from "../../services/actors.ts";
 import { acceptInvite } from "../../services/invites.ts";
-import { enqueueOutbox, signEnvelope, verifyFederationRequest } from "../../services/federation.ts";
 
 const app = new Hono();
 
@@ -324,12 +324,9 @@ app.post("/invites/accept", async c => {
             return c.json({ error: verified.error }, verified.status as 400);
         }
 
-        const code = typeof verified.envelope.payload.code === "string"
-            ? verified.envelope.payload.code
-            : "";
-        const actorUri = typeof verified.envelope.payload.actor_uri === "string"
-            ? verified.envelope.payload.actor_uri
-            : "";
+        const code = typeof verified.envelope.payload.code === "string" ? verified.envelope.payload.code : "";
+        const actorUri =
+            typeof verified.envelope.payload.actor_uri === "string" ? verified.envelope.payload.actor_uri : "";
 
         if (!code || !actorUri) {
             return c.json({ error: "Invalid payload" }, 400);
@@ -353,12 +350,10 @@ app.post("/invites/accept", async c => {
         }
 
         if (!result.alreadyMember) {
-            await enqueueOutbox(
-                "space.member.joined",
-                `${SERVER_ORIGIN}/spaces/${result.spaceId}`,
-                actor.actor_uri,
-                { space_id: result.spaceId, actor_uri: actor.actor_uri },
-            );
+            await enqueueOutbox("space.member.joined", `${SERVER_ORIGIN}/spaces/${result.spaceId}`, actor.actor_uri, {
+                space_id: result.spaceId,
+                actor_uri: actor.actor_uri,
+            });
         }
 
         const response = await signEnvelope("hymenia.invite.accept.response", verified.envelope.request_id, {

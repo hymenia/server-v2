@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { SERVER_ORIGIN } from "../../config/server.ts";
 import { sql } from "../../db/client.ts";
 import { getAuthUser } from "../../services/auth.ts";
-import { signMessage } from "../../services/fedi-crypto.ts";
+import { createSignedEvent } from "../../services/federation.ts";
 import { hasPermission, PERMISSIONS } from "../../services/permissions.ts";
 
 const app = new Hono();
@@ -32,22 +32,6 @@ interface ChatBody {
     parentId?: unknown;
     position?: unknown;
     accessMode?: unknown;
-}
-
-function canonicalize(value: unknown): string {
-    if (value === null || typeof value !== "object") {
-        return JSON.stringify(value);
-    }
-    if (Array.isArray(value)) {
-        return "[" + value.map(canonicalize).join(",") + "]";
-    }
-
-    const entries = Object.entries(value as Record<string, unknown>)
-        .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([k, v]) => JSON.stringify(k) + ":" + canonicalize(v));
-
-    return "{" + entries.join(",") + "}";
 }
 
 class ForbiddenError extends Error {
@@ -109,31 +93,6 @@ async function readBody(c: Context): Promise<ChatBody | null> {
     } catch {
         return null;
     }
-}
-
-async function createSignedEvent(
-    eventType: string,
-    eventId: string,
-    objectUri: string,
-    actorUri: string,
-    payload: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-    const event = {
-        id: eventId,
-        type: eventType,
-        origin: SERVER_ORIGIN,
-        actor: actorUri,
-        object: objectUri,
-        timestamp: new Date().toISOString(),
-        payload,
-    };
-
-    const signature = await signMessage(canonicalize(event));
-
-    return {
-        ...event,
-        signature,
-    };
 }
 
 async function isSpaceMember(spaceId: string, actorId: string): Promise<boolean> {
@@ -289,7 +248,7 @@ app.post("/spaces/:spaceId/chats", async c => {
                     'chat.created',
                     ${federationUri},
                     ${auth.actor.actor_uri},
-                    ${JSON.stringify(signedEvent)}::jsonb
+                    ${tx.json(signedEvent)}
                 )
             `;
 
@@ -497,7 +456,7 @@ app.patch("/chats/:chatId", async c => {
                     'chat.updated',
                     ${federationUri},
                     ${auth.actor.actor_uri},
-                    ${JSON.stringify(signedEvent)}::jsonb
+                    ${tx.json(signedEvent)}
                 )
             `;
 
@@ -590,7 +549,7 @@ app.delete("/chats/:chatId", async c => {
                     'chat.archived',
                     ${federationUri},
                     ${auth.actor.actor_uri},
-                    ${JSON.stringify(signedEvent)}::jsonb
+                    ${tx.json(signedEvent)}
                 )
             `;
 

@@ -5,3 +5,4 @@
 *cookies*.txt
 
 .secrets/
+src/data/disposable_domains.txt
